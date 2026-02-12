@@ -1,17 +1,29 @@
+import time
 from .local_embedding import embed_local
-from .openai_embedding import embed_openai
-from utils.timers import Timer
 
-def embed_chunks(chunks, model_type):
-    timer = Timer()
-    timer.start()
 
-    if model_type == "local":
-        vectors = embed_local(chunks)
-    elif model_type == "openai":
-        vectors = embed_openai(chunks)
-    else:
-        raise ValueError("Invalid embedding model")
+def embed_chunks(chunks, model_type="local"):
+    """
+    Embed text chunks using LOCAL embedding backend only.
 
-    elapsed = timer.stop()
+    Parameters
+    ----------
+    chunks : list[str]
+        Text chunks to embed.
+
+    model_type : str
+        Ignored. Kept only for pipeline compatibility.
+
+    Returns
+    -------
+    vectors : list
+    embedding_time : float
+    """
+
+    start = time.time()
+
+    vectors = embed_local(chunks)
+
+    elapsed = time.time() - start
+
     return vectors, elapsed

@@ -14,14 +14,15 @@ from utils.experiment_sweeper import (
     generate_config_grid,
     run_single_sweep
 )
+from utils.best_config_selector import select_best_config
+from utils.radar_visualizer import plot_comparison_radar
+
 
 st.set_page_config(layout="wide")
-
-st.title("🧪 Research LLM Pipeline Playground")
+st.title("Research LLM Pipeline Playground")
 
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 query = st.text_input("Enter Research Question", "What research gaps exist?")
-
 compare_mode = st.checkbox("Enable Side-by-Side Comparison Mode")
 
 # --------------------------------------------------
@@ -29,18 +30,13 @@ compare_mode = st.checkbox("Enable Side-by-Side Comparison Mode")
 # --------------------------------------------------
 
 st.sidebar.title("Pipeline Controls")
-
-# --------------------------------------------------
-# CHUNK SIZE CONTROL (RESEARCH-GRADE)
-# --------------------------------------------------
-
 st.sidebar.markdown("### Chunk Strategy")
 
 chunk_strategy = st.sidebar.radio(
     "Operating Mode",
     [
         "Precision (400)",
-        "Balanced (600) ⭐ Recommended",
+        "Balanced (600) Recommended",
         "Wide Context (800)",
         "Manual (400–800)"
     ],
@@ -49,16 +45,11 @@ chunk_strategy = st.sidebar.radio(
 
 preset_map = {
     "Precision (400)": 400,
-    "Balanced (600) ⭐ Recommended": 600,
+    "Balanced (600) Recommended": 600,
     "Wide Context (800)": 800
 }
 
-manual_chunk = st.sidebar.slider(
-    "Manual Chunk Size",
-    400,
-    800,
-    600
-)
+manual_chunk = st.sidebar.slider("Manual Chunk Size", 400, 800, 600)
 
 def resolve_chunk_size():
     if chunk_strategy == "Manual (400–800)":
@@ -109,26 +100,12 @@ def build_config(prefix="A"):
         prompt_mode=prompt_mode
     )
 
-# --------------------------------------------------
-# BUILD CONFIGS
-# --------------------------------------------------
-
 config_A = build_config("A")
 config_B = build_config("B") if compare_mode else None
-
 run_button = st.button("Run Pipeline")
 
 # --------------------------------------------------
-# SWEEP UI
-# --------------------------------------------------
-
-st.markdown("---")
-st.markdown("## 🔬 Automated Experiment Sweep")
-
-run_sweep = st.button("Run Parameter Sweep (Batch Experiments)")
-
-# --------------------------------------------------
-# FILE SAVE HELPER
+# FILE SAVE
 # --------------------------------------------------
 
 def save_uploaded_file(uploaded_file):
@@ -150,30 +127,19 @@ if run_button:
 
     save_path = save_uploaded_file(uploaded_file)
 
-    # ---------- SINGLE ----------
     if not compare_mode:
 
         with st.spinner("Running pipeline..."):
             result = run_pipeline(config_A, save_path, query)
 
-        st.subheader("📄 Generated Output")
+        st.subheader("Generated Output")
         st.write(result["output"])
 
-        st.subheader("📊 Metrics")
+        st.subheader("Metrics")
         st.json(result["metrics"])
-
-        st.subheader("🧠 Filtered Gap Sentences")
-        for s in result.get("filtered_context", []):
-            st.write(f"- {s}")
-
-        st.subheader("🔎 Retrieved Chunks")
-        for i, (chunk, score) in enumerate(zip(result["retrieved_chunks"], result["scores"])):
-            with st.expander(f"Chunk {i+1} | Score: {round(score,4)}"):
-                st.write(chunk)
 
         log_single_run(config_A, result)
 
-    # ---------- COMPARISON ----------
     else:
 
         with st.spinner("Running comparison..."):
@@ -182,28 +148,31 @@ if run_button:
 
         analysis = compare_runs(result_A, result_B)
 
-        st.markdown("## 🧪 Divergence Analysis")
+        st.subheader("Divergence Analysis")
         st.json(analysis)
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("## 🅰 Config A Output")
+            st.markdown("### Config A")
             st.write(result_A["output"])
-            st.markdown("### Metrics A")
             st.json(result_A["metrics"])
 
         with col2:
-            st.markdown("## 🅱 Config B Output")
+            st.markdown("### Config B")
             st.write(result_B["output"])
-            st.markdown("### Metrics B")
             st.json(result_B["metrics"])
 
         log_comparison_run(config_A, result_A, config_B, result_B, analysis)
 
 # --------------------------------------------------
-# SWEEP EXECUTION
+# SWEEP
 # --------------------------------------------------
+
+st.markdown("---")
+st.markdown("Automated Experiment Sweep")
+
+run_sweep = st.button("Run Parameter Sweep")
 
 if run_sweep:
 
@@ -213,11 +182,8 @@ if run_sweep:
 
     save_path = save_uploaded_file(uploaded_file)
 
-    st.info("Running automated experiments...")
-
-    # Stable research sweep grid
     param_grid = {
-        "chunk_size": [400, 600, 800],   # stable regime only
+        "chunk_size": [400, 600, 800],
         "top_k": [3, 5],
         "retrieval_mode": ["dense", "hybrid"]
     }
@@ -225,35 +191,72 @@ if run_sweep:
     configs = generate_config_grid(config_A, param_grid)
 
     progress_bar = st.progress(0)
-    status = st.empty()
 
     def progress_callback(current, total):
         progress_bar.progress(current / total)
-        status.write(f"Running experiment {current} / {total}")
 
-    run_single_sweep(
-        configs,
-        save_path,
-        query,
-        progress_callback
-    )
-
-    st.success(f"Completed {len(configs)} experiments and logged results.")
+    run_single_sweep(configs, save_path, query, progress_callback)
+    st.success("Sweep completed and logged.")
 
 # --------------------------------------------------
-# HISTORY VIEW
+# HISTORY
 # --------------------------------------------------
 
 st.markdown("---")
-st.markdown("## 🧾 Experiment History")
+st.markdown("Experiment History")
 
 history = load_experiment_history()
 
 if history:
     st.write(f"Total runs logged: {len(history)}")
-
-    for i, run in enumerate(reversed(history[-10:])):
-        with st.expander(f"Run {len(history)-i} | {run['timestamp']} | {run['mode']}"):
-            st.json(run)
 else:
     st.info("No experiments logged yet.")
+
+# --------------------------------------------------
+# BEST CONFIG SELECTOR
+# --------------------------------------------------
+
+st.markdown("---")
+st.markdown("Best Configuration Detector")
+
+if history:
+    best = select_best_config(history, objective="richness")
+
+    if best:
+        st.json(best)
+    else:
+        st.warning("No valid configurations yet.")
+
+# --------------------------------------------------
+# MODERN RADAR (Plotly)
+# --------------------------------------------------
+
+st.markdown("---")
+st.markdown("Configuration Performance Radar")
+st.caption("Top two configurations selected based on richness objective.")
+st.caption("Higher surface area indicates stronger multi-dimensional research gap performance.")
+
+if history:
+
+    # Score runs properly using richness objective
+    scored_runs = []
+
+    for r in history:
+        if r["mode"] == "single" and r["config"]["chunk_size"] in [400, 600, 800]:
+            score_obj = select_best_config([r], objective="richness")
+            if score_obj:
+                scored_runs.append((r, score_obj["score"]))
+
+    if len(scored_runs) >= 2:
+
+        # Sort by computed richness score
+        ranked = sorted(scored_runs, key=lambda x: x[1], reverse=True)
+
+        best_run = ranked[0][0]
+        second_run = ranked[1][0]
+
+        fig = plot_comparison_radar(best_run, second_run, history)
+
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+

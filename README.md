@@ -304,3 +304,26 @@ The project functions both as a research tool and as an experimental environment
 v1 — Baseline experimental release
 
 ---
+## v2 update
+Version: v2.0 – Experimental Config Intelligence + Visual Analytics
+
+
+## Best Configuration Detector
+![alt text](<Screenshot 2026-02-13 002402.png>)
+![alt text](<Screenshot 2026-02-13 002451.png>)
+
+## Radar Chart
+![alt text](<Screenshot 2026-02-13 001947.png>)
+
+## Chunk Strategy
+![alt text](<Screenshot 2026-02-13 002530.png>)
+
+This version introduces structured experimentation and objective-driven configuration selection for research gap extraction.
+
+Key Additions:
+Stable chunk regime (400–800 tokens)
+Automated parameter sweep (chunk size, retrieval mode, top_k)
+Logged experiment history for reproducibility
+Objective-based best configuration selector
+Research gap richness scoring
+Radar-based multi-dimensional performance visualization
