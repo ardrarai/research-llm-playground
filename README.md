@@ -1,329 +1,163 @@
-# Research Gap Extraction Pipeline (RAG-Based) — v1
-
+# Research Gap Extraction Pipeline (RAG-Based)
+**Version:** v2
+**Status:** Experimental Research System
+---
 ## Overview
-
-This project is an experimental research pipeline for extracting **latent research gaps** from academic PDFs using a configurable Retrieval-Augmented Generation (RAG) architecture.
-
-The system was built to investigate a practical problem:
-> Existing LLM summarization tools generate generic “future work” statements but fail to extract context-grounded, evidence-driven research gaps from real literature.
-
-This pipeline addresses that limitation by explicitly structuring:
-1. semantic segmentation
-2. retrieval strategy
-3. gap-signal filtering
-4. context-conditioned generation
-and measuring how pipeline configuration affects gap quality.
-
-The system is designed not only as a utility, but as an **experimental environment for studying RAG behavior under controlled parameter variation**.
-
+This project is a configurable Retrieval-Augmented Generation (RAG) pipeline designed to **extract context-grounded research gaps from academic PDFs**.
+The motivation is simple but unresolved in most tooling:
+> Existing LLM-based summarization systems produce generic “future work” statements but fail to surface evidence-backed, literature-specific research gaps.
+This pipeline treats *research gap extraction* as a **controlled systems problem**, not a prompt engineering task.
+It explicitly studies how RAG configuration choices influence the **quality, density, and diversity** of extracted gaps.
 ---
-
-## Core Pipeline Architecture
-PDF → Chunking → Embedding → Retrieval → Gap Signal Filtering → Generation → Evaluation
-
-### Components
-
-**Document Loader**
-- Extracts raw text from PDF
-
-**Semantic Chunker**
-- Fixed-size sliding window segmentation
-- Overlap-based continuity preservation
-
-**Embedding Layer**
-- Local embedding model
-- Vector representation for semantic retrieval
-
-**Retrieval Engine**
-Supports three modes:
-- Dense vector similarity
-- BM25 lexical retrieval
-- Hybrid fusion retrieval
-
-**Gap Signal Extractor**
-Heuristic sentence filter detecting research-gap indicators such as:
-- limitation
-- lack of evidence
-- requires further investigation
-- heterogeneity
-- unclear outcomes
-- not widely adopted
-- future research needed
-
-**Context-Aware Generator**
-LLM conditioned only on filtered gap-relevant sentences when available.
-
-**Evaluation Module**
-Computes:
-- retrieved context statistics
-- generation length
-- latency components
-- chunk distribution
-- context utilization density
-
+## System Architecture
+**PDF → Chunking → Embedding → Retrieval → Gap Filtering → Generation → Evaluation**
+### Core Components
+- **PDF Loader**
+  Extracts raw text from academic PDFs.
+- **Semantic Chunker**
+  Fixed-size sliding window segmentation with overlap to preserve semantic continuity.
+- **Embedding Layer**
+  Local embedding model for semantic similarity search.
+- **Retrieval Engine**
+  Supports:
+  - Dense vector retrieval
+  - BM25 lexical retrieval
+  - Hybrid (dense + lexical fusion)
+- **Gap Signal Filter**
+  Heuristic sentence-level filter targeting gap indicators such as:
+  limitations, lack of evidence, unresolved issues, unclear outcomes, low adoption, and future research needs.
+- **Context-Aware Generator**
+  Conditions the LLM **only on gap-relevant sentences** when available, avoiding generic synthesis.
+- **Evaluation Module**
+  Logs:
+  - retrieved context statistics
+  - filtered sentence density
+  - generation length
+  - latency breakdown
+  - context utilization
 ---
-
 ## Interactive Experiment Interface
-Streamlit interface supports:
-
+The Streamlit interface supports:
 ### Single Run Mode
-Run pipeline with manual parameter configuration.
-
+Manual configuration and execution of the pipeline.
 ### Side-by-Side Comparison Mode
-Parallel execution of two configurations with divergence metrics:
+Parallel execution of two configurations with divergence analysis:
 - retrieval overlap
 - filtered context overlap
 - output length difference
 - latency difference
-
 ### Automated Parameter Sweep
-Batch experiment runner across configurable parameter grids.
-All runs are automatically logged.
-
+Batch execution across parameter grids with full experiment logging.
 ---
-
 ## Experiment Logging
-
-Every execution records:
+Every run records:
 - full configuration
 - retrieval statistics
-- generation metrics
-- chunk distribution
+- filtered gap counts
+- latency metrics
 - context utilization
-- divergence analysis (for comparisons)
-
-This enables longitudinal performance tracking and configuration sensitivity analysis.
-
+- comparison divergence (when applicable)
+This enables **configuration sensitivity analysis and reproducible experimentation**.
 ---
-
-## Empirical Research Findings (v1)
-
-Experiments were conducted across multiple configurations varying:
-- chunk size
-- retrieval strategy
-- retrieval depth (top-k)
-All findings below are derived from recorded pipeline runs.
-
----
-
-### 1. Chunk Size is a First-Order Control Parameter
-
-Chunk size directly determines:
-- semantic coherence of retrieval units
-- retrieval search space size
-- context signal density
+## Empirical Findings (v1–v2)
+All observations below are derived from logged experiments.
+### Chunk Size Is a First-Order Control Parameter
+Chunk size directly affects:
+- semantic coherence
+- retrieval precision
+- gap signal density
 - generation specificity
-- overall latency
-
+- inference latency
 Observed behavior:
-
-| Chunk Size | Effect |
-|---|---|
-| Small chunks (≈400) | semantic fragmentation, noisy retrieval, low signal density |
-| Medium chunks (≈600) | optimal semantic coherence and retrieval precision |
-| Large chunks (≈800+) | context dilution and reduced gap specificity |
-
-Empirically optimal range: ~100–140 chunks per document
-
-For the tested corpus, this corresponded to: chunk_size ≈ 600
-
+| Chunk Size | Outcome |
+|----------|--------|
+| ~400 | Fragmented context, noisy gaps |
+| ~600 | Optimal balance of coherence and precision |
+| ≥800 | Context dilution, reduced gap specificity |
+**Empirically optimal regime:** ~600 tokens per chunk.
 ---
-
-### 2. Retrieval Strategy Controls Conceptual Breadth
-
-Dense retrieval:
-- higher precision
-- fewer gap signals
-- shorter outputs
-- lower generation cost
-
-Hybrid retrieval:
-- higher recall
-- more extracted gap statements
-- longer reasoning chains
-- increased generation latency
-
+### Retrieval Strategy Controls Conceptual Breadth
+- **Dense retrieval**
+  Higher precision, fewer gaps, faster inference.
+- **Hybrid retrieval**
+  Higher recall, richer gap discovery, higher latency.
 Interpretation:
-dense → precision-oriented gap extraction
-hybrid → exploratory gap discovery
-
-### 3. Retrieval Depth Governs Reasoning Complexity
-
-Increasing `top_k` produces:
-- higher context sentence count
-- increased conceptual diversity
-- longer generated outputs
-- increased inference time
-Retrieval depth acts as a direct control over reasoning breadth.
-
+Dense → precision-oriented extraction
+Hybrid → exploratory discovery
 ---
-
-### 4. Generation Latency is Context-Driven
-
-Latency is dominated by: generation_time >> embedding_time
-Inference cost scales with:
-- number of filtered sentences
+### Retrieval Depth Governs Reasoning Breadth
+Increasing `top_k`:
+- increases filtered sentence count
+- expands conceptual coverage
+- lengthens generation
+- increases latency
+Retrieval depth acts as a direct control on reasoning complexity.
+---
+### Generation Latency Is Context-Driven
+Latency is dominated by **generation time**, not embedding or chunking.
+Primary drivers:
+- number of filtered gap sentences
 - semantic density of context
 - retrieval recall (hybrid > dense)
-Embedding and chunking have secondary impact.
-
 ---
-
-### 5. Optimal Operational Configurations
-
-**Balanced precision-performance**
-chunk_size = 600
-retrieval_mode = dense
-top_k = 5
-
-**Maximum research discovery**
-chunk_size = 600
-retrieval_mode = hybrid
-top_k = 5
-
-**Fast baseline execution**
-chunk_size = 800
-retrieval_mode = dense
-top_k = 3
-
+## Configuration Intelligence (v2)
+### Best Configuration Detector
+Automatically selects the best-performing configuration based on a chosen objective (e.g., gap richness).
+### Research Gap Richness Scoring
+Scores configurations using:
+- gap density
+- filtered sentence count
+- retrieval breadth
+- output informativeness
+- latency penalty
+### Radar-Based Performance Visualization
+Multi-dimensional radar charts compare top configurations across:
+- gap density
+- filtered signals
+- retrieval volume
+- output strength
+- inverse latency
+Higher surface area indicates stronger multi-dimensional research gap performance.
 ---
-
-## System Design Insight
-This project demonstrates that RAG pipelines are highly sensitive to **semantic segmentation structure**, not only retrieval method.
-Chunking is not preprocessing — it is a primary model behavior control mechanism.
+## Key Insight
+RAG pipelines are **highly sensitive to semantic segmentation structure**.
+Chunking is not a preprocessing step —
+it is a **primary behavioral control mechanism** for downstream reasoning.
 This has direct implications for:
-- research synthesis systems
 - automated literature reviews
 - evidence gap mapping
-- scientific discovery tooling
-
----
-
-## Current Limitations
-- heuristic gap detection (keyword-driven)
-- fixed chunk sizing (non-adaptive)
-- no statistical significance testing
-- single-document processing
-- no semantic deduplication of gaps
-
----
-
-## Version v1 Scope
-Version 1 establishes:
-- stable modular RAG pipeline
-- configuration comparison framework
-- experiment logging infrastructure
-- empirical parameter sensitivity analysis
-- reproducible performance observations
-This version serves as the baseline experimental platform.
-
----
-
-## Next Research Directions
-Planned investigation areas:
-- adaptive chunk size calibration
-- semantic gap clustering
-- cross-document gap aggregation
-- retrieval confidence scoring
-- automatic configuration optimization
-
----
-
-## Purpose
-This system was developed to solve a practical analytical problem:
-extracting meaningful, context-grounded research gaps from real academic literature — not generating generic future work statements.
-The project functions both as a research tool and as an experimental environment for studying structured RAG behavior.
-
----
-
-## Version
----
-
-## System Design Insight
-
-This project demonstrates that RAG pipelines are highly sensitive to **semantic segmentation structure**, not only retrieval method.
-
-Chunking is not preprocessing — it is a primary model behavior control mechanism.
-
-This has direct implications for:
-
 - research synthesis systems
-- automated literature reviews
-- evidence gap mapping
 - scientific discovery tooling
-
 ---
-
 ## Current Limitations
-
-- heuristic gap detection (keyword-driven)
-- fixed chunk sizing (non-adaptive)
-- no statistical significance testing
-- single-document processing
-- no semantic deduplication of gaps
-
+- Heuristic (keyword-based) gap detection
+- Fixed chunk sizing (non-adaptive)
+- No semantic deduplication of gaps
+- No statistical significance testing
+- Single-document focus
 ---
-
-## Version v1 Scope
-
-Version 1 establishes:
-
-- stable modular RAG pipeline
+## Scope Summary
+**v1 established:**
+- modular RAG pipeline
 - configuration comparison framework
-- experiment logging infrastructure
-- empirical parameter sensitivity analysis
-- reproducible performance observations
-
-This version serves as the baseline experimental platform.
-
+- experiment logging
+- empirical sensitivity analysis
+**v2 introduced:**
+- objective-driven configuration selection
+- automated experiment sweeps
+- configuration intelligence layer
+- radar-based performance visualization
 ---
-
-## Next Research Directions
-
-Planned investigation areas:
-
-- adaptive chunk size calibration
-- semantic gap clustering
-- cross-document gap aggregation
-- retrieval confidence scoring
-- automatic configuration optimization
-
----
-
 ## Purpose
-
-This system was developed to solve a practical analytical problem:
-
-extracting meaningful, context-grounded research gaps from real academic literature — not generating generic future work statements.
-
-The project functions both as a research tool and as an experimental environment for studying structured RAG behavior.
-
+This system is built to **extract meaningful, evidence-backed research gaps from real academic literature**, not to generate generic future work statements.
+It functions both as:
+- a practical research analysis tool
+- an experimental environment for studying structured RAG behavior
 ---
-
-## Version
-v1 — Baseline experimental release
-
----
-## v2 update
-Version: v2.0 – Experimental Config Intelligence + Visual Analytics
-
-
-## Best Configuration Detector
-![alt text](<Screenshot 2026-02-13 002402.png>)
-![alt text](<Screenshot 2026-02-13 002451.png>)
-
-## Radar Chart
-![alt text](<Screenshot 2026-02-13 001947.png>)
-
-## Chunk Strategy
-![alt text](<Screenshot 2026-02-13 002530.png>)
-
-This version introduces structured experimentation and objective-driven configuration selection for research gap extraction.
-
-Key Additions:
-Stable chunk regime (400–800 tokens)
-Automated parameter sweep (chunk size, retrieval mode, top_k)
-Logged experiment history for reproducibility
-Objective-based best configuration selector
-Research gap richness scoring
-Radar-based multi-dimensional performance visualization
+## Roadmap
+Planned research directions:
+- adaptive chunk sizing
+- semantic gap deduplication
+- diversity-aware gap scoring
+- configuration stability analysis
+- research-paper-ready reporting

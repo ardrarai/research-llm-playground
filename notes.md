@@ -10,3 +10,4 @@
 
 ## Empirical Evidence
 Context length is the primary driver of local LLM latency.
+
