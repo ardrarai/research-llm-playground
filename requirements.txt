@@ -8,3 +8,4 @@ matplotlib
 seaborn
 nltk
 pypdf
+rank-bm25
