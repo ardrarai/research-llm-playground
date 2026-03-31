@@ -1,37 +1,89 @@
-import faiss
 import numpy as np
 
+# --------------------------------------------
+# OPTIONAL FAISS IMPORT (SAFE)
+# --------------------------------------------
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
+
+
+# --------------------------------------------
+# UTILS
+# --------------------------------------------
 
 def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    denom = (np.linalg.norm(a) * np.linalg.norm(b))
+    if denom == 0:
+        return 0.0
+    return np.dot(a, b) / denom
 
+
+def compute_similarity_scores(query_vector, vectors):
+    """
+    Fallback similarity computation using cosine similarity
+    """
+    sims = []
+    for vec in vectors:
+        sims.append(cosine_similarity(query_vector, vec))
+    return np.array(sims)
+
+
+# --------------------------------------------
+# MAIN RETRIEVER
+# --------------------------------------------
 
 def dense_retrieve(query_vector, vectors, chunks, top_k, lambda_param=0.7):
     """
-    Dense retrieval with MMR for diversity.
+    Dense retrieval with MMR (Maximal Marginal Relevance)
+
+    Works with:
+    - FAISS (if available)
+    - Numpy fallback (deployment-safe)
     """
 
-    dim = vectors.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(vectors)
+    # --------------------------------------------
+    # STEP 1: GET SIMILARITY SCORES
+    # --------------------------------------------
 
-    D, I = index.search(np.array([query_vector]), len(chunks))
+    if FAISS_AVAILABLE:
+        dim = vectors.shape[1]
+        index = faiss.IndexFlatL2(dim)
+        index.add(vectors)
 
-    similarities = [1 / (1 + d) for d in D[0]]
+        D, I = index.search(np.array([query_vector]), len(chunks))
+
+        # Convert L2 distance → similarity
+        similarities = np.array([1 / (1 + d) for d in D[0]])
+        candidate_indices = I[0]
+
+    else:
+        # Fallback path (used in Streamlit Cloud)
+        similarities = compute_similarity_scores(query_vector, vectors)
+        candidate_indices = np.argsort(similarities)[::-1]  # descending
+
+
+    # --------------------------------------------
+    # STEP 2: MMR SELECTION
+    # --------------------------------------------
 
     selected = []
     selected_scores = []
     selected_indices = []
 
-    for _ in range(top_k):
+    for _ in range(min(top_k, len(chunks))):
+
         best_score = -1
         best_idx = -1
 
-        for i, idx in enumerate(I[0]):
+        for idx in candidate_indices:
+
             if idx in selected_indices:
                 continue
 
-            relevance = similarities[i]
+            relevance = similarities[idx]
 
             diversity_penalty = 0
             for sel_idx in selected_indices:
@@ -45,6 +97,9 @@ def dense_retrieve(query_vector, vectors, chunks, top_k, lambda_param=0.7):
             if mmr_score > best_score:
                 best_score = mmr_score
                 best_idx = idx
+
+        if best_idx == -1:
+            break
 
         selected_indices.append(best_idx)
         selected.append(chunks[best_idx])
