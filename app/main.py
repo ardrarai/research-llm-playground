@@ -1,5 +1,7 @@
 import sys
 import os
+
+# Ensure imports work on Streamlit Cloud
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
@@ -28,34 +30,37 @@ from utils.radar_visualizer import plot_comparison_radar
 # PAGE CONFIG
 # --------------------------------------------------
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="LLM Pipeline Behavior System",
+    layout="wide"
+)
 
 st.title("LLM Pipeline Behavior Analysis System")
+st.caption("Controlled experimental environment for studying how RAG configurations influence LLM behavior")
 
 st.markdown("""
-### Experimental Study Interface
+### System Purpose
 
-- Real-time control of semantic segmentation (chunk size)
-- Multi-objective configuration comparison (richness vs latency)
-- Full observability of retrieval + generation pipeline
+This interface exposes how structural pipeline decisions affect:
+
+- reasoning coherence
+- retrieval quality
+- latency and context utilization
+
+The system is designed for **observation, not optimization**.
 """)
 
-st.info("This system studies how structural pipeline decisions influence LLM behavior.")
-
-st.markdown("""
-### Methodology
-
-Define → Execute → Observe → Compare → Infer
-""")
+st.info("Outputs may vary across identical runs due to inherent variability in generative systems.")
 
 
 # --------------------------------------------------
-# INPUT
+# INPUT SECTION
 # --------------------------------------------------
 
-st.markdown("## Experiment Setup")
+st.markdown("---")
+st.header("Experiment Setup")
 
-uploaded_file = st.file_uploader("Research Document", type="pdf")
+uploaded_file = st.file_uploader("Upload Research Document (PDF)", type="pdf")
 
 query = st.text_input(
     "Research Question",
@@ -71,19 +76,19 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     experiment_mode = st.radio(
-        "Experiment Type",
+        "Experiment Mode",
         ["Single Run", "Batch Study"]
     )
 
 with col2:
-    compare_mode = st.checkbox("Enable Comparison")
+    compare_mode = st.checkbox("Enable Configuration Comparison")
 
 
 # --------------------------------------------------
-# SIDEBAR
+# SIDEBAR CONFIGURATION
 # --------------------------------------------------
 
-st.sidebar.title("Experimental Variables")
+st.sidebar.title("Pipeline Controls")
 
 st.sidebar.markdown("### Semantic Segmentation")
 st.sidebar.caption("Controls coherence vs fragmentation")
@@ -125,7 +130,7 @@ def build_config(prefix="A"):
     st.sidebar.markdown("---")
 
     retrieval_mode = st.sidebar.selectbox(
-        f"Retrieval {prefix}",
+        f"Retrieval Strategy {prefix}",
         ["dense", "bm25", "hybrid"]
     )
 
@@ -154,12 +159,8 @@ config_B = build_config("B") if compare_mode else None
 
 
 # --------------------------------------------------
-# RUN
+# FILE HANDLING
 # --------------------------------------------------
-
-st.markdown("---")
-run_button = st.button("Run Experiment", use_container_width=True)
-
 
 def save_file(file):
     path = os.path.join("data", "uploads", file.name)
@@ -169,66 +170,75 @@ def save_file(file):
     return path
 
 
+# --------------------------------------------------
+# RUN EXECUTION
+# --------------------------------------------------
+
+st.markdown("---")
+run_button = st.button("Run Experiment", use_container_width=True)
+
 if run_button:
 
     if uploaded_file is None:
-        st.error("Upload a PDF first.")
+        st.error("Please upload a PDF before running the experiment.")
         st.stop()
 
-    path = save_file(uploaded_file)
+    try:
+        path = save_file(uploaded_file)
 
-    if experiment_mode == "Single Run":
+        if experiment_mode == "Single Run":
 
-        result = run_pipeline(config_A, path, query)
+            result = run_pipeline(config_A, path, query)
 
-        st.markdown("## Observability")
+            st.markdown("## Observability Metrics")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Chunks", result["debug"]["total_chunks_created"])
-        c2.metric("Signals", result["debug"]["filtered_sentence_count"])
-        c3.metric("Latency", round(result["metrics"]["total_latency"], 2))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Chunks", result["debug"]["total_chunks_created"])
+            c2.metric("Signals", result["debug"]["filtered_sentence_count"])
+            c3.metric("Latency (s)", round(result["metrics"]["total_latency"], 2))
 
-        st.caption("Metrics reflect how current configuration influenced system behavior")
+            st.caption("Metrics reflect how configuration influences system behavior")
 
-        st.markdown("## Interpretation")
+            st.markdown("## Interpretation")
 
-        if experiment_note:
-            st.info(f"Intent: {experiment_note}")
+            if experiment_note:
+                st.info(f"Intent: {experiment_note}")
 
-        for i in interpret_metrics(result):
-            st.write(f"- {i}")
+            for insight in interpret_metrics(result):
+                st.write(f"- {insight}")
 
-        failures = detect_failure_modes(config_A, result)
-        for f in failures:
-            st.error(f)
+            failures = detect_failure_modes(config_A, result)
+            for f in failures:
+                st.error(f)
 
-        with st.expander("Generated Output"):
-            st.write(result["output"])
+            with st.expander("Generated Output"):
+                st.write(result["output"])
 
-        log_single_run(config_A, result)
+            log_single_run(config_A, result)
 
-    else:
-        st.markdown("Running batch experiments...")
-        # keep your sweep same
+        else:
+            st.warning("Batch mode execution configured. (Ensure sweep logic is implemented)")
+
+    except Exception as e:
+        st.error(f"Execution failed: {str(e)}")
+
 
 # --------------------------------------------------
-# CONFIGURATION COMPARISON (RADAR)
+# COMPARISON RADAR
 # --------------------------------------------------
 
 history = load_experiment_history()
 
 if history:
 
-    valid_runs = [
-        r for r in history
-        if r["mode"] == "single"
-    ]
+    valid_runs = [r for r in history if r["mode"] == "single"]
 
     if len(valid_runs) >= 2:
 
-        st.markdown("## Configuration Behavior Comparison")
+        st.markdown("---")
+        st.header("Configuration Comparison")
 
-        st.caption("Compares how different configurations shape system behavior across multiple dimensions")
+        st.caption("Compares how different configurations affect system behavior")
 
         ranked = sorted(
             valid_runs,
@@ -244,37 +254,41 @@ if history:
         if fig:
             st.plotly_chart(fig, use_container_width=False)
 
-# --------------------------------------------------
-# HISTORY + TIMELINE
-# --------------------------------------------------
 
-history = load_experiment_history()
+# --------------------------------------------------
+# TIMELINE + INSIGHTS
+# --------------------------------------------------
 
 if history:
 
     st.markdown("---")
-    st.markdown("## Experiment Evolution")
+    st.header("Experiment Evolution")
 
-    st.caption("Each point represents a configuration → output behavior mapping")
+    st.caption("Each point represents configuration → behavior mapping")
 
     fig = plot_experiment_timeline(history)
 
     if fig:
         st.plotly_chart(fig, use_container_width=True)
 
-    # 🔥 KEY FIX
     st.markdown("## Causal Insights")
-
-    st.caption("Explains how configuration changes affected system behavior")
 
     insights = generate_timeline_insights(history)
 
-    for i in insights:
-        st.success(i)
+    for insight in insights:
+        st.success(insight)
 
-    # ---------------- BEST CONFIG ----------------
-    st.markdown("## Optimal Configuration")
+
+# --------------------------------------------------
+# BEST CONFIG
+# --------------------------------------------------
+
+if history:
+
+    st.markdown("---")
+    st.header("Best Configuration (Observed)")
 
     best = select_best_config(history, objective="richness")
+
     if best:
         st.json(best)
