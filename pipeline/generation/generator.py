@@ -1,47 +1,70 @@
-import ollama
-from utils.timers import Timer
+# --------------------------------------------
+# OPTIONAL OLLAMA IMPORT
+# --------------------------------------------
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
 
 
-def generate_answer(query, context_chunks, temperature, prompt_mode):
+# --------------------------------------------
+# MAIN GENERATION FUNCTION
+# --------------------------------------------
 
-    timer = Timer()
-    timer.start()
-
-    max_sentences = 8
-    context = "\n\n".join(context_chunks[:max_sentences])
-
-    system_prompt = """
-    You are a research analyst.
-
-    Based strictly on the extracted academic sentences,
-    identify 3–5 concise research gaps.
-
-    Be direct.
-    Avoid repetition.
+def generate_answer(context, query, mode="conservative"):
+    """
+    Generates answer using:
+    - Ollama (local)
+    - Fallback (cloud-safe)
     """
 
-    user_prompt = f"""
-    Context:
-    {context}
+    # -----------------------------
+    # LOCAL (OLLAMA)
+    # -----------------------------
+    if OLLAMA_AVAILABLE:
+        try:
+            response = ollama.chat(
+                model="phi3:mini",
+                messages=[
+                    {"role": "system", "content": "You are a precise research assistant."},
+                    {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{query}"}
+                ]
+            )
+            return response["message"]["content"]
 
-    Research Question:
-    {query}
+        except Exception:
+            pass  # fallback if ollama fails
+
+    # -----------------------------
+    # FALLBACK (DEPLOYMENT SAFE)
+    # -----------------------------
+    return fallback_generate(context, query, mode)
+
+
+# --------------------------------------------
+# FALLBACK GENERATION
+# --------------------------------------------
+
+def fallback_generate(context, query, mode):
+    """
+    Lightweight deterministic fallback.
+    Ensures system runs without LLM dependency.
     """
 
-    response = ollama.chat(
-        model="llama3.2:3b",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        options={
-            "temperature": temperature,
-            "num_predict": 300   # limits output length
-        }
-    )
+    # Simple heuristic output (clean, not garbage)
+    context_preview = context[:500] if isinstance(context, str) else str(context)
 
-    output = response["message"]["content"]
+    return f"""
+[Fallback Generation]
 
-    elapsed = timer.stop()
+Query:
+{query}
 
-    return output, elapsed
+Observed Context (truncated):
+{context_preview}
+
+Note:
+LLM generation is disabled in this environment.
+This output reflects retrieved signals without generative synthesis.
+"""
