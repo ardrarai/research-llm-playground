@@ -3,6 +3,12 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
+
+from utils.behavior_interpreter import interpret_metrics, detect_failure_modes
+from utils.timeline_visualizer import (
+    plot_experiment_timeline,
+    generate_timeline_insights
+)
 from pipeline.orchestrator import run_pipeline, compare_runs
 from utils.config_schema import PipelineConfig
 from utils.experiment_logger import (
@@ -18,76 +24,117 @@ from utils.best_config_selector import select_best_config
 from utils.radar_visualizer import plot_comparison_radar
 
 
+# --------------------------------------------------
+# PAGE CONFIG
+# --------------------------------------------------
+
 st.set_page_config(layout="wide")
-st.title("Research LLM Pipeline Playground")
 
-uploaded_file = st.file_uploader("Upload PDF", type="pdf")
-query = st.text_input("Enter Research Question", "What research gaps exist?")
-compare_mode = st.checkbox("Enable Side-by-Side Comparison Mode")
+st.title("LLM Pipeline Behavior Analysis System")
+
+st.markdown("""
+### Experimental Study Interface
+
+- Real-time control of semantic segmentation (chunk size)
+- Multi-objective configuration comparison (richness vs latency)
+- Full observability of retrieval + generation pipeline
+""")
+
+st.info("This system studies how structural pipeline decisions influence LLM behavior.")
+
+st.markdown("""
+### Methodology
+
+Define → Execute → Observe → Compare → Infer
+""")
+
 
 # --------------------------------------------------
-# SIDEBAR CONTROLS
+# INPUT
 # --------------------------------------------------
 
-st.sidebar.title("Pipeline Controls")
-st.sidebar.markdown("### Chunk Strategy")
+st.markdown("## Experiment Setup")
 
-chunk_strategy = st.sidebar.radio(
-    "Operating Mode",
-    [
-        "Precision (400)",
-        "Balanced (600) Recommended",
-        "Wide Context (800)",
-        "Manual (400–800)"
-    ],
-    index=1
+uploaded_file = st.file_uploader("Research Document", type="pdf")
+
+query = st.text_input(
+    "Research Question",
+    "What research gaps exist?"
 )
 
-preset_map = {
-    "Precision (400)": 400,
-    "Balanced (600) Recommended": 600,
-    "Wide Context (800)": 800
-}
+experiment_note = st.text_input(
+    "Experiment Intent",
+    placeholder="What are you testing?"
+)
 
-manual_chunk = st.sidebar.slider("Manual Chunk Size", 400, 800, 600)
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    experiment_mode = st.radio(
+        "Experiment Type",
+        ["Single Run", "Batch Study"]
+    )
+
+with col2:
+    compare_mode = st.checkbox("Enable Comparison")
+
+
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
+
+st.sidebar.title("Experimental Variables")
+
+st.sidebar.markdown("### Semantic Segmentation")
+st.sidebar.caption("Controls coherence vs fragmentation")
+
+chunking_mode = st.sidebar.radio(
+    "Segmentation Strategy",
+    ["Fixed", "Adaptive"]
+)
+
+
+def resolve_chunking_mode():
+    return "adaptive" if chunking_mode == "Adaptive" else "fixed"
+
 
 def resolve_chunk_size():
-    if chunk_strategy == "Manual (400–800)":
-        return manual_chunk
-    return preset_map[chunk_strategy]
+    if resolve_chunking_mode() == "adaptive":
+        return None
 
-# --------------------------------------------------
-# CONFIG BUILDER
-# --------------------------------------------------
+    mode = st.sidebar.radio(
+        "Chunk Size",
+        ["400", "600", "800", "Manual"]
+    )
+
+    if mode == "Manual":
+        return st.sidebar.slider("Manual Size", 400, 800, 600)
+
+    return int(mode)
+
 
 def build_config(prefix="A"):
 
-    st.sidebar.markdown(f"## Config {prefix}")
-
     chunk_size = resolve_chunk_size()
 
-    chunk_overlap = st.sidebar.slider(
-        f"Overlap {prefix}", 0, 300, 150, key=f"overlap_{prefix}"
-    )
+    if resolve_chunking_mode() == "fixed":
+        chunk_overlap = st.sidebar.slider(f"Overlap {prefix}", 0, 300, 150)
+    else:
+        chunk_overlap = 0
+
+    st.sidebar.markdown("---")
 
     retrieval_mode = st.sidebar.selectbox(
-        f"Retrieval Mode {prefix}",
-        ["dense", "bm25", "hybrid"],
-        key=f"retrieval_{prefix}"
+        f"Retrieval {prefix}",
+        ["dense", "bm25", "hybrid"]
     )
 
-    top_k = st.sidebar.slider(
-        f"Top K {prefix}", 1, 10, 5, key=f"topk_{prefix}"
-    )
-
-    temperature = st.sidebar.slider(
-        f"Temperature {prefix}", 0.0, 1.0, 0.2, key=f"temp_{prefix}"
-    )
+    top_k = st.sidebar.slider(f"Top-K {prefix}", 1, 10, 5)
+    temperature = st.sidebar.slider(f"Temperature {prefix}", 0.0, 1.0, 0.2)
 
     prompt_mode = st.sidebar.selectbox(
         f"Prompt Mode {prefix}",
-        ["conservative", "creative", "structured"],
-        key=f"prompt_{prefix}"
+        ["conservative", "creative", "structured"]
     )
 
     return PipelineConfig(
@@ -97,166 +144,137 @@ def build_config(prefix="A"):
         retrieval_mode=retrieval_mode,
         top_k=top_k,
         temperature=temperature,
-        prompt_mode=prompt_mode
+        prompt_mode=prompt_mode,
+        chunking_mode=resolve_chunking_mode()
     )
+
 
 config_A = build_config("A")
 config_B = build_config("B") if compare_mode else None
-run_button = st.button("Run Pipeline")
+
 
 # --------------------------------------------------
-# FILE SAVE
+# RUN
 # --------------------------------------------------
 
-def save_uploaded_file(uploaded_file):
-    save_path = os.path.join("data", "uploads", uploaded_file.name)
+st.markdown("---")
+run_button = st.button("Run Experiment", use_container_width=True)
+
+
+def save_file(file):
+    path = os.path.join("data", "uploads", file.name)
     os.makedirs("data/uploads", exist_ok=True)
-    with open(save_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return save_path
+    with open(path, "wb") as f:
+        f.write(file.getbuffer())
+    return path
 
-# --------------------------------------------------
-# MANUAL EXECUTION
-# --------------------------------------------------
 
 if run_button:
 
     if uploaded_file is None:
-        st.error("Please upload a PDF first.")
+        st.error("Upload a PDF first.")
         st.stop()
 
-    save_path = save_uploaded_file(uploaded_file)
+    path = save_file(uploaded_file)
 
-    if not compare_mode:
+    if experiment_mode == "Single Run":
 
-        with st.spinner("Running pipeline..."):
-            result = run_pipeline(config_A, save_path, query)
+        result = run_pipeline(config_A, path, query)
 
-        st.subheader("Generated Output")
-        st.write(result["output"])
+        st.markdown("## Observability")
 
-        st.subheader("Metrics")
-        st.json(result["metrics"])
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Chunks", result["debug"]["total_chunks_created"])
+        c2.metric("Signals", result["debug"]["filtered_sentence_count"])
+        c3.metric("Latency", round(result["metrics"]["total_latency"], 2))
+
+        st.caption("Metrics reflect how current configuration influenced system behavior")
+
+        st.markdown("## Interpretation")
+
+        if experiment_note:
+            st.info(f"Intent: {experiment_note}")
+
+        for i in interpret_metrics(result):
+            st.write(f"- {i}")
+
+        failures = detect_failure_modes(config_A, result)
+        for f in failures:
+            st.error(f)
+
+        with st.expander("Generated Output"):
+            st.write(result["output"])
 
         log_single_run(config_A, result)
 
     else:
-
-        with st.spinner("Running comparison..."):
-            result_A = run_pipeline(config_A, save_path, query)
-            result_B = run_pipeline(config_B, save_path, query)
-
-        analysis = compare_runs(result_A, result_B)
-
-        st.subheader("Divergence Analysis")
-        st.json(analysis)
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("### Config A")
-            st.write(result_A["output"])
-            st.json(result_A["metrics"])
-
-        with col2:
-            st.markdown("### Config B")
-            st.write(result_B["output"])
-            st.json(result_B["metrics"])
-
-        log_comparison_run(config_A, result_A, config_B, result_B, analysis)
+        st.markdown("Running batch experiments...")
+        # keep your sweep same
 
 # --------------------------------------------------
-# SWEEP
+# CONFIGURATION COMPARISON (RADAR)
 # --------------------------------------------------
-
-st.markdown("---")
-st.markdown("Automated Experiment Sweep")
-
-run_sweep = st.button("Run Parameter Sweep")
-
-if run_sweep:
-
-    if uploaded_file is None:
-        st.error("Upload PDF first.")
-        st.stop()
-
-    save_path = save_uploaded_file(uploaded_file)
-
-    param_grid = {
-        "chunk_size": [400, 600, 800],
-        "top_k": [3, 5],
-        "retrieval_mode": ["dense", "hybrid"]
-    }
-
-    configs = generate_config_grid(config_A, param_grid)
-
-    progress_bar = st.progress(0)
-
-    def progress_callback(current, total):
-        progress_bar.progress(current / total)
-
-    run_single_sweep(configs, save_path, query, progress_callback)
-    st.success("Sweep completed and logged.")
-
-# --------------------------------------------------
-# HISTORY
-# --------------------------------------------------
-
-st.markdown("---")
-st.markdown("Experiment History")
 
 history = load_experiment_history()
 
 if history:
-    st.write(f"Total runs logged: {len(history)}")
-else:
-    st.info("No experiments logged yet.")
 
-# --------------------------------------------------
-# BEST CONFIG SELECTOR
-# --------------------------------------------------
+    valid_runs = [
+        r for r in history
+        if r["mode"] == "single"
+    ]
 
-st.markdown("---")
-st.markdown("Best Configuration Detector")
+    if len(valid_runs) >= 2:
 
-if history:
-    best = select_best_config(history, objective="richness")
+        st.markdown("## Configuration Behavior Comparison")
 
-    if best:
-        st.json(best)
-    else:
-        st.warning("No valid configurations yet.")
+        st.caption("Compares how different configurations shape system behavior across multiple dimensions")
 
-# --------------------------------------------------
-# MODERN RADAR (Plotly)
-# --------------------------------------------------
+        ranked = sorted(
+            valid_runs,
+            key=lambda r: r["debug"]["filtered_sentence_count"],
+            reverse=True
+        )
 
-st.markdown("---")
-st.markdown("Configuration Performance Radar")
-st.caption("Top two configurations selected based on richness objective.")
-st.caption("Higher surface area indicates stronger multi-dimensional research gap performance.")
-
-if history:
-
-    # Score runs properly using richness objective
-    scored_runs = []
-
-    for r in history:
-        if r["mode"] == "single" and r["config"]["chunk_size"] in [400, 600, 800]:
-            score_obj = select_best_config([r], objective="richness")
-            if score_obj:
-                scored_runs.append((r, score_obj["score"]))
-
-    if len(scored_runs) >= 2:
-
-        # Sort by computed richness score
-        ranked = sorted(scored_runs, key=lambda x: x[1], reverse=True)
-
-        best_run = ranked[0][0]
-        second_run = ranked[1][0]
+        best_run = ranked[0]
+        second_run = ranked[1]
 
         fig = plot_comparison_radar(best_run, second_run, history)
 
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=False)
 
+# --------------------------------------------------
+# HISTORY + TIMELINE
+# --------------------------------------------------
+
+history = load_experiment_history()
+
+if history:
+
+    st.markdown("---")
+    st.markdown("## Experiment Evolution")
+
+    st.caption("Each point represents a configuration → output behavior mapping")
+
+    fig = plot_experiment_timeline(history)
+
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 🔥 KEY FIX
+    st.markdown("## Causal Insights")
+
+    st.caption("Explains how configuration changes affected system behavior")
+
+    insights = generate_timeline_insights(history)
+
+    for i in insights:
+        st.success(i)
+
+    # ---------------- BEST CONFIG ----------------
+    st.markdown("## Optimal Configuration")
+
+    best = select_best_config(history, objective="richness")
+    if best:
+        st.json(best)

@@ -1,4 +1,5 @@
 import re
+from pipeline.chunking.adaptive_chunker import adaptive_chunk_document
 
 
 def clean_text(text: str):
@@ -20,13 +21,12 @@ def clean_text(text: str):
     return text
 
 
-def chunk_document(text: str, chunk_size: int, overlap: int):
+def fixed_chunk_document(text: str, chunk_size: int, overlap: int):
     """
-    Sentence-aware chunking with overlap.
+    Sentence-aware fixed-size chunking with character-based overlap.
     """
 
     text = clean_text(text)
-
     sentences = re.split(r'(?<=[.!?])\s+', text)
 
     chunks = []
@@ -47,3 +47,29 @@ def chunk_document(text: str, chunk_size: int, overlap: int):
         chunks.append(current_chunk.strip())
 
     return chunks
+
+
+def chunk_document(
+    text: str,
+    chunk_size: int,
+    overlap: int,
+    *,
+    chunk_mode: str = "fixed",
+    target_chunk_tokens: int = 600,
+    chunk_overlap_sentences: int = 2
+):
+    """
+    Unified chunking entrypoint.
+    """
+
+    text = clean_text(text)
+
+    if chunk_mode == "adaptive":
+        return adaptive_chunk_document(
+            text=text,
+            target_chunk_tokens=target_chunk_tokens,
+            chunk_overlap_sentences=chunk_overlap_sentences
+        )
+
+    # Default: fixed mode
+    return fixed_chunk_document(text, chunk_size, overlap)

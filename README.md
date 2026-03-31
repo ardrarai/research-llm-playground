@@ -1,163 +1,189 @@
-# Research Gap Extraction Pipeline (RAG-Based)
-**Version:** v2
+# LLM Pipeline Behavior Analysis System
 **Status:** Experimental Research System
+
 ---
-## Overview
-This project is a configurable Retrieval-Augmented Generation (RAG) pipeline designed to **extract context-grounded research gaps from academic PDFs**.
-The motivation is simple but unresolved in most tooling:
-> Existing LLM-based summarization systems produce generic “future work” statements but fail to surface evidence-backed, literature-specific research gaps.
-This pipeline treats *research gap extraction* as a **controlled systems problem**, not a prompt engineering task.
-It explicitly studies how RAG configuration choices influence the **quality, density, and diversity** of extracted gaps.
+
+## 1. Problem
+
+Most LLM-based systems are tuned through prompt engineering, while upstream pipeline decisions remain fixed and largely unexamined. This leads to unstable outputs, weak interpretability, and difficulty in diagnosing failure modes.
+
+In practice, generation quality is often treated as a property of the model, when it is significantly influenced by pipeline structure.
+
+This system treats a Retrieval-Augmented Generation (RAG) pipeline as a **controllable system**, where behavior is studied through structured variation of configuration parameters.
+
+The objective is to answer:
+
+> Which parts of the pipeline actually control reasoning behavior and output quality?
+
 ---
-## System Architecture
-**PDF → Chunking → Embedding → Retrieval → Gap Filtering → Generation → Evaluation**
-### Core Components
-- **PDF Loader**
-  Extracts raw text from academic PDFs.
-- **Semantic Chunker**
-  Fixed-size sliding window segmentation with overlap to preserve semantic continuity.
-- **Embedding Layer**
-  Local embedding model for semantic similarity search.
-- **Retrieval Engine**
-  Supports:
-  - Dense vector retrieval
-  - BM25 lexical retrieval
-  - Hybrid (dense + lexical fusion)
-- **Gap Signal Filter**
-  Heuristic sentence-level filter targeting gap indicators such as:
-  limitations, lack of evidence, unresolved issues, unclear outcomes, low adoption, and future research needs.
-- **Context-Aware Generator**
-  Conditions the LLM **only on gap-relevant sentences** when available, avoiding generic synthesis.
-- **Evaluation Module**
-  Logs:
-  - retrieved context statistics
-  - filtered sentence density
-  - generation length
-  - latency breakdown
-  - context utilization
+
+## 2. System Structure
+
+Pipeline:
+PDF → Chunking → Embedding → Retrieval → Context Filtering → Generation → Logging
+
+Each stage is explicitly configurable and observable.
+
 ---
-## Interactive Experiment Interface
-The Streamlit interface supports:
-### Single Run Mode
-Manual configuration and execution of the pipeline.
-### Side-by-Side Comparison Mode
-Parallel execution of two configurations with divergence analysis:
-- retrieval overlap
-- filtered context overlap
-- output length difference
-- latency difference
-### Automated Parameter Sweep
-Batch execution across parameter grids with full experiment logging.
+
+## 3. What the System Enables
+
+- Controlled variation of pipeline parameters
+- Side-by-side comparison of configurations
+- Parameter sweeps across defined ranges
+- Logging of system-level behavior
+
+The system is not optimized for output quality alone.
+It is designed to observe **how outputs change under controlled conditions**.
+
 ---
-## Experiment Logging
-Every run records:
-- full configuration
+
+## 4. Experimental Variables
+
+| Variable | Description | Expected Effect |
+|----------|------------|----------------|
+| Chunk Size | Token length of text segments | Coherence vs fragmentation |
+| Retrieval Strategy | Dense / Hybrid (dense + lexical) | Precision vs recall |
+| Retrieval Depth (Top-K) | Number of retrieved chunks | Reasoning breadth vs latency |
+| Context Filtering | Signal-based filtering | Noise reduction vs coverage |
+
+Each experiment isolates one variable while holding others constant.
+
+---
+
+## 5. Observability
+
+Each run logs:
+
 - retrieval statistics
-- filtered gap counts
-- latency metrics
+- filtered context density
+- output length
+- latency breakdown
 - context utilization
-- comparison divergence (when applicable)
-This enables **configuration sensitivity analysis and reproducible experimentation**.
+
+These logs allow reproducible comparison across configurations.
+
 ---
-## Empirical Findings (v1–v2)
-All observations below are derived from logged experiments.
-### Chunk Size Is a First-Order Control Parameter
-Chunk size directly affects:
-- semantic coherence
-- retrieval precision
-- gap signal density
-- generation specificity
-- inference latency
-Observed behavior:
-| Chunk Size | Outcome |
-|----------|--------|
-| ~400 | Fragmented context, noisy gaps |
-| ~600 | Optimal balance of coherence and precision |
-| ≥800 | Context dilution, reduced gap specificity |
-**Empirically optimal regime:** ~600 tokens per chunk.
+
+## 6. Experiment Log (Representative Runs)
+
+### 6.1 Chunk Size Sensitivity
+
+| Chunk Size | Observed Behavior | Output Quality | Latency |
+|------------|-----------------|----------------|---------|
+| ~400 tokens | Fragmented context, incoherent reasoning | Low | Low |
+| ~600 tokens | Balanced context, consistent reasoning | High | Moderate |
+| ≥800 tokens | Context dilution, reduced specificity | Medium | High |
+
+**Observation:**
+Chunk size acts as a primary control parameter for reasoning behavior.
+
 ---
-### Retrieval Strategy Controls Conceptual Breadth
-- **Dense retrieval**
-  Higher precision, fewer gaps, faster inference.
-- **Hybrid retrieval**
-  Higher recall, richer gap discovery, higher latency.
-Interpretation:
-Dense → precision-oriented extraction
-Hybrid → exploratory discovery
+
+### 6.2 Retrieval Strategy Comparison
+
+| Strategy | Precision | Recall | Output Behavior |
+|----------|----------|--------|-----------------|
+| Dense | High | Lower | Focused, narrow reasoning |
+| Hybrid | Moderate | High | Broader, exploratory reasoning |
+
+**Observation:**
+Hybrid retrieval increases coverage but introduces noise.
+
 ---
-### Retrieval Depth Governs Reasoning Breadth
-Increasing `top_k`:
-- increases filtered sentence count
-- expands conceptual coverage
-- lengthens generation
-- increases latency
-Retrieval depth acts as a direct control on reasoning complexity.
+
+### 6.3 Retrieval Depth (Top-K)
+
+| Top-K | Context Size | Reasoning Breadth | Latency |
+|------|-------------|------------------|---------|
+| 1–3 | Low | Narrow | Low |
+| 5–8 | Moderate | Balanced | Moderate |
+| 10+ | High | Broad but noisy | High |
+
+**Observation:**
+Retrieval depth directly controls reasoning complexity and latency.
+
 ---
-### Generation Latency Is Context-Driven
-Latency is dominated by **generation time**, not embedding or chunking.
-Primary drivers:
-- number of filtered gap sentences
-- semantic density of context
-- retrieval recall (hybrid > dense)
+
+### 6.4 Stability Check (Repeated Runs)
+
+| Configuration | Run Variability | Notes |
+|--------------|----------------|------|
+| Fixed config (chunk=600, k=5) | Moderate | Output phrasing varies |
+| Hybrid + high k | High | Redundancy and drift observed |
+
+**Observation:**
+Outputs are not deterministic even under identical configurations.
+
 ---
-## Configuration Intelligence (v2)
-### Best Configuration Detector
-Automatically selects the best-performing configuration based on a chosen objective (e.g., gap richness).
-### Research Gap Richness Scoring
-Scores configurations using:
-- gap density
-- filtered sentence count
-- retrieval breadth
-- output informativeness
-- latency penalty
-### Radar-Based Performance Visualization
-Multi-dimensional radar charts compare top configurations across:
-- gap density
-- filtered signals
-- retrieval volume
-- output strength
-- inverse latency
-Higher surface area indicates stronger multi-dimensional research gap performance.
+
+## 7. Key Findings
+
+- Chunking determines reasoning coherence more than model choice
+- Retrieval strategy controls conceptual breadth
+- Retrieval depth scales reasoning complexity and latency
+- Output stability is inherently variable
+
 ---
-## Key Insight
-RAG pipelines are **highly sensitive to semantic segmentation structure**.
-Chunking is not a preprocessing step —
-it is a **primary behavioral control mechanism** for downstream reasoning.
-This has direct implications for:
-- automated literature reviews
-- evidence gap mapping
-- research synthesis systems
-- scientific discovery tooling
+
+## 8. Failure Modes
+
+- Over-fragmentation at small chunk sizes
+- Redundant context at high retrieval depth
+- Loss of specificity at large chunk sizes
+- Instability across repeated runs
+
+These are treated as system properties, not bugs.
+
 ---
-## Current Limitations
-- Heuristic (keyword-based) gap detection
-- Fixed chunk sizing (non-adaptive)
-- No semantic deduplication of gaps
-- No statistical significance testing
-- Single-document focus
+
+## 9. Interface
+
+The system includes a minimal Streamlit interface supporting:
+
+- manual configuration runs
+- side-by-side comparison
+- parameter sweeps
+
+The interface is intentionally simple. The focus is on behavior, not presentation.
+
 ---
-## Scope Summary
-**v1 established:**
-- modular RAG pipeline
-- configuration comparison framework
-- experiment logging
-- empirical sensitivity analysis
-**v2 introduced:**
-- objective-driven configuration selection
-- automated experiment sweeps
-- configuration intelligence layer
-- radar-based performance visualization
+
+## 10. Setup
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+Run the system:
+```bash
+streamlit run app.py
+```
 ---
-## Purpose
-This system is built to **extract meaningful, evidence-backed research gaps from real academic literature**, not to generate generic future work statements.
-It functions both as:
-- a practical research analysis tool
-- an experimental environment for studying structured RAG behavior
+
+## 11. Design Philosophy
+Control over creativity
+Observability over output quality
+Experimentation over assumptions
+Stability and failure are first-class concerns
+
 ---
-## Roadmap
-Planned research directions:
-- adaptive chunk sizing
-- semantic gap deduplication
-- diversity-aware gap scoring
-- configuration stability analysis
-- research-paper-ready reporting
+
+## 12. Limitations
+| Area          | Limitation                      |
+| ------------- | ------------------------------- |
+| Chunking      | Fixed-size segmentation         |
+| Filtering     | Heuristic signal detection      |
+| Evaluation    | No statistical validation       |
+| Scope         | Limited multi-document analysis |
+| Deduplication | No semantic redundancy removal  |
+
+---
+
+## 13. Purpose
+
+This system is not designed to produce answers.
+
+It is designed to make LLM behavior observable, controllable, and analyzable.
+

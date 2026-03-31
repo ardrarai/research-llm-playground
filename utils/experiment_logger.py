@@ -1,60 +1,56 @@
 import json
 import os
 from datetime import datetime
+from utils.behavior_interpreter import interpret_metrics
 
 LOG_PATH = "data/experiments/experiment_log.json"
 
 
-def _ensure_log_file():
+def _ensure():
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     if not os.path.exists(LOG_PATH):
-        with open(LOG_PATH, "w") as f:
-            json.dump([], f)
+        json.dump([], open(LOG_PATH, "w"))
 
 
-def _load_logs():
-    _ensure_log_file()
-    with open(LOG_PATH, "r") as f:
-        return json.load(f)
+def _load():
+    _ensure()
+    return json.load(open(LOG_PATH))
 
 
-def _save_logs(logs):
-    with open(LOG_PATH, "w") as f:
-        json.dump(logs, f, indent=2)
+def _save(data):
+    json.dump(data, open(LOG_PATH, "w"), indent=2)
 
 
 def log_single_run(config, result):
-    logs = _load_logs()
 
-    entry = {
+    logs = _load()
+
+    logs.append({
         "timestamp": datetime.now().isoformat(),
         "mode": "single",
         "config": vars(config),
         "metrics": result["metrics"],
         "debug": result.get("debug", {}),
-        "output_length": len(result["output"])
-    }
+        "insights": interpret_metrics(result)
+    })
 
-    logs.append(entry)
-    _save_logs(logs)
+    _save(logs)
 
 
 def log_comparison_run(config_A, result_A, config_B, result_B, analysis):
-    logs = _load_logs()
 
-    entry = {
+    logs = _load()
+
+    logs.append({
         "timestamp": datetime.now().isoformat(),
         "mode": "comparison",
         "config_A": vars(config_A),
         "config_B": vars(config_B),
-        "metrics_A": result_A["metrics"],
-        "metrics_B": result_B["metrics"],
         "analysis": analysis
-    }
+    })
 
-    logs.append(entry)
-    _save_logs(logs)
+    _save(logs)
 
 
 def load_experiment_history():
-    return _load_logs()
+    return _load()

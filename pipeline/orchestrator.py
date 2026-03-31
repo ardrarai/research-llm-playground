@@ -1,6 +1,13 @@
 import re
+import os
+import pickle
+import hashlib
+
 from utils.pdf_loader import load_pdf
-from pipeline.chunking.chunker import chunk_document
+
+from pipeline.chunking.chunker import fixed_chunk_document
+from pipeline.chunking.adaptive_chunker import adaptive_chunk_document
+
 from pipeline.embedding.embedder import embed_chunks
 from pipeline.retrieval.retriever import retrieve
 from pipeline.generation.generator import generate_answer
@@ -8,84 +15,58 @@ from pipeline.evaluation.metrics import compute_metrics
 
 
 # ---------------------------------------------------
-# GAP SENTENCE EXTRACTION
+# CACHE SETUP
+# ---------------------------------------------------
+
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def get_cache_key(text, config):
+    return hashlib.md5(
+        f"{len(text)}_{config.chunk_size}_{config.chunking_mode}".encode()
+    ).hexdigest()
+
+
+# ---------------------------------------------------
+# GAP EXTRACTION
 # ---------------------------------------------------
 
 def extract_gap_sentences(chunks, max_sentences=12):
-    """
-    Extract sentences likely indicating research gaps.
-    """
 
     keywords = [
-        "limitation",
-        "limitations",
-        "future",
-        "further",
-        "challenge",
-        "lack",
-        "insufficient",
-        "gap",
-        "needed",
-        "requires",
-        "should",
-        "not become widespread",
-        "could not",
-        "cannot",
-        "remains unclear",
-        "yet to be",
-        "uncertain",
-        "not fully effective",
-        "active area for future research"
+        "limitation", "future", "lack", "gap",
+        "uncertain", "not fully effective"
     ]
 
-    filtered_sentences = []
+    results = []
 
     for chunk in chunks:
         sentences = re.split(r'(?<=[.!?])\s+', chunk)
 
-        for sentence in sentences:
-            sentence_clean = sentence.strip().lower()
+        for s in sentences:
+            if any(k in s.lower() for k in keywords):
+                results.append(s.strip())
 
-            if any(keyword in sentence_clean for keyword in keywords):
-                filtered_sentences.append(sentence.strip())
-
-    return filtered_sentences[:max_sentences]
+    return results[:max_sentences]
 
 
 # ---------------------------------------------------
-# CONTEXT SIZE CONTROL
+# CONTEXT CONTROL
 # ---------------------------------------------------
 
 def cap_context_length(sentences, max_chars=2500):
-    """
-    Prevent local LLM slowdown by hard-capping context size.
-    """
 
     combined = ""
     selected = []
 
-    for sentence in sentences:
-        if len(combined) + len(sentence) > max_chars:
+    for s in sentences:
+        if len(combined) + len(s) > max_chars:
             break
-        combined += sentence + " "
-        selected.append(sentence)
+        combined += s + " "
+        selected.append(s)
 
     return selected
-
-def compute_overlap(list_a, list_b):
-    """
-    Compute Jaccard similarity between two lists.
-    """
-    set_a = set(list_a)
-    set_b = set(list_b)
-
-    if not set_a and not set_b:
-        return 1.0
-
-    intersection = set_a.intersection(set_b)
-    union = set_a.union(set_b)
-
-    return round(len(intersection) / len(union), 3)
 
 
 # ---------------------------------------------------
@@ -94,16 +75,33 @@ def compute_overlap(list_a, list_b):
 
 def run_pipeline(config, document_path, query):
 
-    # 1️⃣ Load PDF
     text = load_pdf(document_path)
 
-    # 2️⃣ Chunk
-    chunks = chunk_document(text, config.chunk_size, config.chunk_overlap)
+    # ✅ CHUNKING SAFE
+    if config.chunking_mode == "adaptive":
+        chunks = adaptive_chunk_document(text)
+    else:
+        if config.chunk_size is None:
+            raise ValueError("chunk_size cannot be None in fixed mode")
 
-    # 3️⃣ Embed
-    vectors, embed_time = embed_chunks(chunks, config.embedding_model)
+        chunks = fixed_chunk_document(
+            text,
+            config.chunk_size,
+            config.chunk_overlap
+        )
 
-    # 4️⃣ Retrieve
+    # ⚡ CACHE EMBEDDINGS
+    key = get_cache_key(text, config)
+    path = os.path.join(CACHE_DIR, f"{key}.pkl")
+
+    if os.path.exists(path):
+        chunks, vectors = pickle.load(open(path, "rb"))
+        embed_time = 0
+    else:
+        vectors, embed_time = embed_chunks(chunks, config.embedding_model)
+        pickle.dump((chunks, vectors), open(path, "wb"))
+
+    # RETRIEVE
     retrieved_chunks, scores = retrieve(
         query,
         vectors,
@@ -112,80 +110,64 @@ def run_pipeline(config, document_path, query):
         config.top_k
     )
 
-    # 5️⃣ Gap-aware filtering
-    filtered_context = extract_gap_sentences(retrieved_chunks)
+    # FILTER
+    filtered = extract_gap_sentences(retrieved_chunks)
 
-    # 6️⃣ Cap context size for LLM stability
-    if filtered_context:
-        context_for_generation = cap_context_length(filtered_context)
+    # CONTEXT
+    if filtered:
+        context = cap_context_length(filtered)
     else:
-        # fallback to first few raw chunks (also capped)
-        fallback_sentences = retrieved_chunks[:3]
-        context_for_generation = cap_context_length(fallback_sentences)
+        context = cap_context_length(retrieved_chunks[:3])
 
-    # 7️⃣ Generate
+    # GENERATE
     output, gen_time = generate_answer(
         query,
-        context_for_generation,
+        context,
         config.temperature,
         config.prompt_mode
     )
 
-    # 8️⃣ Latency tracking
     latency = {
         "embedding_time": embed_time,
         "generation_time": gen_time
     }
 
-    # 9️⃣ Metrics
     metrics = compute_metrics(retrieved_chunks, output, latency)
 
-    # 🔟 Additional debug metadata
-    debug_info = {
+    debug = {
+        "chunking_mode": config.chunking_mode,
         "total_chunks_created": len(chunks),
         "retrieved_count": len(retrieved_chunks),
-        "filtered_sentence_count": len(filtered_context),
-        "context_sentences_used": len(context_for_generation)
+        "filtered_sentence_count": len(filtered),
+        "context_sentences_used": len(context)
     }
 
     return {
         "output": output,
         "retrieved_chunks": retrieved_chunks,
-        "filtered_context": filtered_context,
+        "filtered_context": filtered,
         "scores": scores,
         "metrics": metrics,
         "latency": latency,
-        "debug": debug_info
+        "debug": debug
     }
 
-def compare_runs(result_A, result_B):
-    """
-    Quantify divergence between two pipeline runs.
-    """
 
-    retrieval_overlap = compute_overlap(
-        result_A["retrieved_chunks"],
-        result_B["retrieved_chunks"]
-    )
+# ---------------------------------------------------
+# COMPARISON
+# ---------------------------------------------------
 
-    filtered_overlap = compute_overlap(
-        result_A.get("filtered_context", []),
-        result_B.get("filtered_context", [])
-    )
+def compute_overlap(a, b):
+    if not a and not b:
+        return 1.0
+    return round(len(set(a) & set(b)) / len(set(a) | set(b)), 3)
 
-    output_length_diff = abs(
-        result_A["metrics"]["output_length"] -
-        result_B["metrics"]["output_length"]
-    )
 
-    latency_diff = abs(
-        result_A["metrics"]["total_latency"] -
-        result_B["metrics"]["total_latency"]
-    )
+def compare_runs(A, B):
 
     return {
-        "retrieval_overlap": retrieval_overlap,
-        "filtered_overlap": filtered_overlap,
-        "output_length_difference": output_length_diff,
-        "latency_difference": round(latency_diff, 3)
+        "retrieval_overlap": compute_overlap(A["retrieved_chunks"], B["retrieved_chunks"]),
+        "filtered_overlap": compute_overlap(A["filtered_context"], B["filtered_context"]),
+        "output_length_difference": abs(A["metrics"]["output_length"] - B["metrics"]["output_length"]),
+        "latency_difference": round(abs(A["metrics"]["total_latency"] - B["metrics"]["total_latency"]), 3)
     }
